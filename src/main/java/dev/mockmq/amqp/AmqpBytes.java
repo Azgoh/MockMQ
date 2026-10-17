@@ -4,12 +4,10 @@ import java.nio.charset.StandardCharsets;
 
 public final class AmqpBytes {
 
-    private AmqpBytes() {
-    }
+    private AmqpBytes() {}
 
     public static int readUnsignedShort(byte[] bytes, int offset) {
-        return ((bytes[offset] & 0xFF) << 8)
-                | (bytes[offset + 1] & 0xFF);
+        return ((bytes[offset] & 0xFF) << 8) | (bytes[offset + 1] & 0xFF);
     }
 
     public static long readLong(byte[] bytes, int offset) {
@@ -28,22 +26,10 @@ public final class AmqpBytes {
 
         int start = offset + 1;
 
-        String value = new String(
-                bytes,
-                start,
-                length,
-                StandardCharsets.UTF_8
-        );
+        String value = new String(bytes, start, length, StandardCharsets.UTF_8);
 
-        return new ShortString(
-                value,
-                start + length
-        );
+        return new ShortString(value, start + length);
     }
 
-    public record ShortString(
-            String value,
-            int nextOffset
-    ) {
-    }
+    public record ShortString(String value, int nextOffset) {}
 }

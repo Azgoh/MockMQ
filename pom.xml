@@ -13,6 +13,8 @@
         <rabbitmq.version>5.37.0</rabbitmq.version>
         <slf4j.version>2.0.20</slf4j.version>
         <log4j2.version>2.26.1</log4j2.version>
+        <spotless-maven-plugin.version>3.7.0</spotless-maven-plugin.version>
+        <palantir-java-format.version>2.96.0</palantir-java-format.version>
     </properties>
 
     <dependencies>
@@ -39,5 +41,31 @@
             <version>${log4j2.version}</version>
         </dependency>
     </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>com.diffplug.spotless</groupId>
+                <artifactId>spotless-maven-plugin</artifactId>
+                <version>${spotless-maven-plugin.version}</version>
+                <configuration>
+                    <java>
+                        <palantirJavaFormat>
+                        <version>${palantir-java-format.version}</version>
+                    </palantirJavaFormat>
+                    </java>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>check-formatting</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
 
 </project>

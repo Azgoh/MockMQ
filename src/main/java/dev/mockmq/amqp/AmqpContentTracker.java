@@ -3,35 +3,25 @@ package dev.mockmq.amqp;
 import dev.mockmq.model.DeliverEvent;
 import dev.mockmq.model.PublishEvent;
 import dev.mockmq.tracking.AmqpEventSink;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.ByteArrayOutputStream;
 import java.util.HashMap;
 import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class AmqpContentTracker {
 
-    private static final Logger logger =
-            LoggerFactory.getLogger(
-                    AmqpContentTracker.class
-            );
+    private static final Logger logger = LoggerFactory.getLogger(AmqpContentTracker.class);
 
     private final long connectionId;
     private final AmqpEventSink eventSink;
 
-    private final Map<Integer, PendingContent> pendingByChannel =
-            new HashMap<>();
+    private final Map<Integer, PendingContent> pendingByChannel = new HashMap<>();
 
-    public AmqpContentTracker(
-            long connectionId,
-            AmqpEventSink eventSink
-    ) {
-        this.connectionId =
-                connectionId;
+    public AmqpContentTracker(long connectionId, AmqpEventSink eventSink) {
+        this.connectionId = connectionId;
 
-        this.eventSink =
-                eventSink;
+        this.eventSink = eventSink;
     }
 
     public void onMethod(
@@ -41,59 +31,28 @@ public class AmqpContentTracker {
             String methodName,
             String details,
             byte[] bytes,
-            int argumentsOffset
-    ) {
-        if (!carriesContent(
-                classId,
-                methodId
-        )) {
+            int argumentsOffset) {
+        if (!carriesContent(classId, methodId)) {
             return;
         }
 
-        PendingContent content =
-                new PendingContent(
-                        classId,
-                        methodId,
-                        methodName,
-                        details
-                );
+        PendingContent content = new PendingContent(classId, methodId, methodName, details);
 
-        if (classId == 60
-                && methodId == 40) {
+        if (classId == 60 && methodId == 40) {
 
-            decodePublishMetadata(
-                    content,
-                    bytes,
-                    argumentsOffset
-            );
+            decodePublishMetadata(content, bytes, argumentsOffset);
         }
 
-        if (classId == 60
-                && methodId == 60) {
+        if (classId == 60 && methodId == 60) {
 
-            decodeDeliveryMetadata(
-                    content,
-                    bytes,
-                    argumentsOffset
-            );
+            decodeDeliveryMetadata(content, bytes, argumentsOffset);
         }
 
-        pendingByChannel.put(
-                channel,
-                content
-        );
+        pendingByChannel.put(channel, content);
     }
 
-    public void onHeader(
-            int channel,
-            byte[] bytes,
-            int payloadOffset,
-            int payloadSize
-    ) {
-        PendingContent content =
-                pendingByChannel.get(
-                        channel
-                );
+    public void onHeader(int channel, byte[] bytes, int payloadOffset, int payloadSize) {
+        PendingContent content = pendingByChannel.get(channel);
 
         if (content == null) {
             return;
@@ -103,34 +62,19 @@ public class AmqpContentTracker {
             return;
         }
 
-        int classId =
-                AmqpBytes.readUnsignedShort(
-                        bytes,
-                        payloadOffset
-                );
+        int classId = AmqpBytes.readUnsignedShort(bytes, payloadOffset);
 
-        long bodySize =
-                AmqpBytes.readLong(
-                        bytes,
-                        payloadOffset + 4
-                );
+        long bodySize = AmqpBytes.readLong(bytes, payloadOffset + 4);
 
-        content.expectedBodySize =
-                bodySize;
+        content.expectedBodySize = bodySize;
 
-        Map<String, Object> properties =
-                Map.of();
+        Map<String, Object> properties = Map.of();
 
         if (classId == 60) {
-            properties =
-                    AmqpBasicPropertiesDecoder.decode(
-                            bytes,
-                            payloadOffset + 12
-                    );
+            properties = AmqpBasicPropertiesDecoder.decode(bytes, payloadOffset + 12);
         }
 
-        content.properties =
-                properties;
+        content.properties = properties;
 
         logger.info(
                 "CONTENT | conn={} | channel={} | {} | bodySize={} bytes | properties={}",
@@ -138,177 +82,94 @@ public class AmqpContentTracker {
                 channel,
                 content.methodName,
                 bodySize,
-                properties
-        );
+                properties);
 
         if (bodySize == 0) {
-            complete(
-                    channel,
-                    content
-            );
+            complete(channel, content);
         }
     }
 
-    public void onBody(
-            int channel,
-            byte[] bytes,
-            int payloadOffset,
-            int payloadSize
-    ) {
-        PendingContent content =
-                pendingByChannel.get(
-                        channel
-                );
+    public void onBody(int channel, byte[] bytes, int payloadOffset, int payloadSize) {
+        PendingContent content = pendingByChannel.get(channel);
 
         if (content == null) {
             return;
         }
 
-        content.body.write(
-                bytes,
-                payloadOffset,
-                payloadSize
-        );
+        content.body.write(bytes, payloadOffset, payloadSize);
 
-        if (content.body.size()
-                >= content.expectedBodySize) {
+        if (content.body.size() >= content.expectedBodySize) {
 
-            complete(
+            complete(channel, content);
+        }
+    }
+
+    private void complete(int channel, PendingContent content) {
+        byte[] body = content.body.toByteArray();
+
+        if (content.classId == 60 && content.methodId == 40) {
+
+            eventSink.accept(new PublishEvent(
+                    connectionId, channel, content.exchange, content.routingKey, content.properties, body));
+        }
+
+        if (content.classId == 60 && content.methodId == 60) {
+
+            eventSink.accept(new DeliverEvent(
+                    connectionId,
                     channel,
-                    content
-            );
+                    content.deliveryTag,
+                    content.exchange,
+                    content.routingKey,
+                    content.redelivered,
+                    content.properties,
+                    body));
         }
+
+        pendingByChannel.remove(channel);
     }
 
-    private void complete(
-            int channel,
-            PendingContent content
-    ) {
-        byte[] body =
-                content.body.toByteArray();
-
-        if (content.classId == 60
-                && content.methodId == 40) {
-
-            eventSink.accept(
-                    new PublishEvent(
-                            connectionId,
-                            channel,
-                            content.exchange,
-                            content.routingKey,
-                            content.properties,
-                            body
-                    )
-            );
-        }
-
-        if (content.classId == 60
-                && content.methodId == 60) {
-
-            eventSink.accept(
-                    new DeliverEvent(
-                            connectionId,
-                            channel,
-                            content.deliveryTag,
-                            content.exchange,
-                            content.routingKey,
-                            content.redelivered,
-                            content.properties,
-                            body
-                    )
-            );
-        }
-
-        pendingByChannel.remove(
-                channel
-        );
-    }
-
-    private void decodePublishMetadata(
-            PendingContent content,
-            byte[] bytes,
-            int offset
-    ) {
+    private void decodePublishMetadata(PendingContent content, byte[] bytes, int offset) {
         offset += 2;
 
-        AmqpBytes.ShortString exchange =
-                AmqpBytes.readShortString(
-                        bytes,
-                        offset
-                );
+        AmqpBytes.ShortString exchange = AmqpBytes.readShortString(bytes, offset);
 
-        offset =
-                exchange.nextOffset();
+        offset = exchange.nextOffset();
 
-        AmqpBytes.ShortString routingKey =
-                AmqpBytes.readShortString(
-                        bytes,
-                        offset
-                );
+        AmqpBytes.ShortString routingKey = AmqpBytes.readShortString(bytes, offset);
 
-        content.exchange =
-                exchange.value();
+        content.exchange = exchange.value();
 
-        content.routingKey =
-                routingKey.value();
+        content.routingKey = routingKey.value();
     }
 
-    private void decodeDeliveryMetadata(
-            PendingContent content,
-            byte[] bytes,
-            int offset
-    ) {
-        AmqpBytes.ShortString consumerTag =
-                AmqpBytes.readShortString(
-                        bytes,
-                        offset
-                );
+    private void decodeDeliveryMetadata(PendingContent content, byte[] bytes, int offset) {
+        AmqpBytes.ShortString consumerTag = AmqpBytes.readShortString(bytes, offset);
 
-        offset =
-                consumerTag.nextOffset();
+        offset = consumerTag.nextOffset();
 
-        content.deliveryTag =
-                AmqpBytes.readLong(
-                        bytes,
-                        offset
-                );
+        content.deliveryTag = AmqpBytes.readLong(bytes, offset);
 
         offset += 8;
 
-        int flags =
-                bytes[offset] & 0xFF;
+        int flags = bytes[offset] & 0xFF;
 
-        content.redelivered =
-                (flags & 0x01) != 0;
+        content.redelivered = (flags & 0x01) != 0;
 
         offset++;
 
-        AmqpBytes.ShortString exchange =
-                AmqpBytes.readShortString(
-                        bytes,
-                        offset
-                );
+        AmqpBytes.ShortString exchange = AmqpBytes.readShortString(bytes, offset);
 
-        offset =
-                exchange.nextOffset();
+        offset = exchange.nextOffset();
 
-        AmqpBytes.ShortString routingKey =
-                AmqpBytes.readShortString(
-                        bytes,
-                        offset
-                );
+        AmqpBytes.ShortString routingKey = AmqpBytes.readShortString(bytes, offset);
 
-        content.exchange =
-                exchange.value();
+        content.exchange = exchange.value();
 
-        content.routingKey =
-                routingKey.value();
+        content.routingKey = routingKey.value();
     }
 
-    private boolean carriesContent(
-            int classId,
-            int methodId
-    ) {
+    private boolean carriesContent(int classId, int methodId) {
         if (classId != 60) {
             return false;
         }
@@ -335,29 +196,18 @@ public class AmqpContentTracker {
 
         private long expectedBodySize;
 
-        private Map<String, Object> properties =
-                Map.of();
+        private Map<String, Object> properties = Map.of();
 
-        private final ByteArrayOutputStream body =
-                new ByteArrayOutputStream();
+        private final ByteArrayOutputStream body = new ByteArrayOutputStream();
 
-        private PendingContent(
-                int classId,
-                int methodId,
-                String methodName,
-                String details
-        ) {
-            this.classId =
-                    classId;
+        private PendingContent(int classId, int methodId, String methodName, String details) {
+            this.classId = classId;
 
-            this.methodId =
-                    methodId;
+            this.methodId = methodId;
 
-            this.methodName =
-                    methodName;
+            this.methodName = methodName;
 
-            this.details =
-                    details;
+            this.details = details;
         }
     }
 }

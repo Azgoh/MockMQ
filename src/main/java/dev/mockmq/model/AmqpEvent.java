@@ -1,9 +1,6 @@
 package dev.mockmq.model;
 
-public sealed interface AmqpEvent
-        permits PublishEvent,
-        DeliverEvent,
-        NackEvent {
+public sealed interface AmqpEvent permits PublishEvent, DeliverEvent, NackEvent {
 
     long connectionId();
 

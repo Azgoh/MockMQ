@@ -4,26 +4,20 @@ import dev.mockmq.model.AmqpEvent;
 import dev.mockmq.model.DeliverEvent;
 import dev.mockmq.model.NackEvent;
 import dev.mockmq.model.PublishEvent;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-public class MessageJourneyTracker
-        implements AmqpEventSink {
+public class MessageJourneyTracker implements AmqpEventSink {
 
-    private static final Logger logger =
-            LoggerFactory.getLogger(
-                    MessageJourneyTracker.class
-            );
+    private static final Logger logger = LoggerFactory.getLogger(MessageJourneyTracker.class);
 
     /*
      * fingerprint -> journey
      */
-    private final Map<String, MessageJourney> journeys =
-            new HashMap<>();
+    private final Map<String, MessageJourney> journeys = new HashMap<>();
 
     /*
      * delivery identity -> fingerprint
@@ -34,41 +28,23 @@ public class MessageJourneyTracker
      * So when we see Deliver first, we remember
      * which message fingerprint that delivery belongs to.
      */
-    private final Map<DeliveryKey, String> deliveries =
-            new HashMap<>();
+    private final Map<DeliveryKey, String> deliveries = new HashMap<>();
 
     @Override
-    public synchronized void accept(
-            AmqpEvent event
-    ) {
+    public synchronized void accept(AmqpEvent event) {
         switch (event) {
+            case PublishEvent publish -> onPublish(publish);
 
-            case PublishEvent publish ->
-                    onPublish(publish);
+            case DeliverEvent deliver -> onDeliver(deliver);
 
-            case DeliverEvent deliver ->
-                    onDeliver(deliver);
-
-            case NackEvent nack ->
-                    onNack(nack);
+            case NackEvent nack -> onNack(nack);
         }
     }
 
-    private void onPublish(
-            PublishEvent event
-    ) {
-        String fingerprint =
-                fingerprint(
-                        event.exchange(),
-                        event.routingKey(),
-                        event.body()
-                );
+    private void onPublish(PublishEvent event) {
+        String fingerprint = fingerprint(event.exchange(), event.routingKey(), event.body());
 
-        MessageJourney journey =
-                journeys.computeIfAbsent(
-                        fingerprint,
-                        MessageJourney::new
-                );
+        MessageJourney journey = journeys.computeIfAbsent(fingerprint, MessageJourney::new);
 
         journey.publishCount++;
 
@@ -79,39 +55,19 @@ public class MessageJourneyTracker
                 event.channel(),
                 event.exchange(),
                 event.routingKey(),
-                text(event.body())
-        );
+                text(event.body()));
     }
 
-    private void onDeliver(
-            DeliverEvent event
-    ) {
-        String fingerprint =
-                fingerprint(
-                        event.exchange(),
-                        event.routingKey(),
-                        event.body()
-                );
+    private void onDeliver(DeliverEvent event) {
+        String fingerprint = fingerprint(event.exchange(), event.routingKey(), event.body());
 
-        MessageJourney journey =
-                journeys.computeIfAbsent(
-                        fingerprint,
-                        MessageJourney::new
-                );
+        MessageJourney journey = journeys.computeIfAbsent(fingerprint, MessageJourney::new);
 
         journey.deliveryCount++;
 
-        DeliveryKey deliveryKey =
-                new DeliveryKey(
-                        event.connectionId(),
-                        event.channel(),
-                        event.deliveryTag()
-                );
+        DeliveryKey deliveryKey = new DeliveryKey(event.connectionId(), event.channel(), event.deliveryTag());
 
-        deliveries.put(
-                deliveryKey,
-                fingerprint
-        );
+        deliveries.put(deliveryKey, fingerprint);
 
         logger.info(
                 "[journey={}] DELIVER | conn={}/ch={} | tag={} | delivery#={} | redelivered={} | body=\"{}\"",
@@ -121,36 +77,19 @@ public class MessageJourneyTracker
                 event.deliveryTag(),
                 journey.deliveryCount,
                 event.redelivered(),
-                text(event.body())
-        );
+                text(event.body()));
 
-        Object headers =
-                event.properties()
-                        .get("headers");
+        Object headers = event.properties().get("headers");
 
         if (headers != null) {
-            logger.info(
-                    "[journey={}] HEADERS | {}",
-                    fingerprint,
-                    headers
-            );
+            logger.info("[journey={}] HEADERS | {}", fingerprint, headers);
         }
     }
 
-    private void onNack(
-            NackEvent event
-    ) {
-        DeliveryKey deliveryKey =
-                new DeliveryKey(
-                        event.connectionId(),
-                        event.channel(),
-                        event.deliveryTag()
-                );
+    private void onNack(NackEvent event) {
+        DeliveryKey deliveryKey = new DeliveryKey(event.connectionId(), event.channel(), event.deliveryTag());
 
-        String fingerprint =
-                deliveries.get(
-                        deliveryKey
-                );
+        String fingerprint = deliveries.get(deliveryKey);
 
         if (fingerprint == null) {
             logger.info(
@@ -159,14 +98,12 @@ public class MessageJourneyTracker
                     event.channel(),
                     event.deliveryTag(),
                     event.multiple(),
-                    event.requeue()
-            );
+                    event.requeue());
 
             return;
         }
 
-        MessageJourney journey =
-                journeys.get(fingerprint);
+        MessageJourney journey = journeys.get(fingerprint);
 
         if (journey != null) {
             journey.nackCount++;
@@ -178,41 +115,20 @@ public class MessageJourneyTracker
                 event.connectionId(),
                 event.channel(),
                 event.deliveryTag(),
-                journey != null
-                        ? journey.nackCount
-                        : "?",
+                journey != null ? journey.nackCount : "?",
                 event.multiple(),
-                event.requeue()
-        );
+                event.requeue());
     }
 
-    private String fingerprint(
-            String exchange,
-            String routingKey,
-            byte[] body
-    ) {
-        return MessageFingerprint.of(
-                exchange,
-                routingKey,
-                body
-        );
+    private String fingerprint(String exchange, String routingKey, byte[] body) {
+        return MessageFingerprint.of(exchange, routingKey, body);
     }
 
-    private String text(
-            byte[] body
-    ) {
-        return new String(
-                body,
-                StandardCharsets.UTF_8
-        );
+    private String text(byte[] body) {
+        return new String(body, StandardCharsets.UTF_8);
     }
 
-    private record DeliveryKey(
-            long connectionId,
-            int channel,
-            long deliveryTag
-    ) {
-    }
+    private record DeliveryKey(long connectionId, int channel, long deliveryTag) {}
 
     private static class MessageJourney {
 
@@ -222,11 +138,8 @@ public class MessageJourneyTracker
         private int deliveryCount;
         private int nackCount;
 
-        private MessageJourney(
-                String fingerprint
-        ) {
-            this.fingerprint =
-                    fingerprint;
+        private MessageJourney(String fingerprint) {
+            this.fingerprint = fingerprint;
         }
     }
 }

@@ -2,8 +2,7 @@ package dev.mockmq.amqp;
 
 public final class AmqpMethodRegistry {
 
-    private AmqpMethodRegistry() {
-    }
+    private AmqpMethodRegistry() {}
 
     public static String name(int classId, int methodId) {
         return switch (classId) {

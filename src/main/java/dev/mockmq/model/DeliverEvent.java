@@ -10,6 +10,5 @@ public record DeliverEvent(
         String routingKey,
         boolean redelivered,
         Map<String, Object> properties,
-        byte[] body
-) implements AmqpEvent {
-}
+        byte[] body)
+        implements AmqpEvent {}
